@@ -61,4 +61,16 @@ tests/
 
 **Day 4 ✅**: Replaced mock retriever with FAISS + sentence-transformers (all-MiniLM-L6-v2) over 3347 PubMedQA passages. Disk-cached index for sub-2s load times across re-runs. Manual inspection on 5 eval samples surfaced four research-relevant retrieval behaviors per failure mode — most notably, that NLTK's sentence boundaries naturally isolate hallucinated citations as standalone claims, leading to high-quality UNSUPPORTED retrieval signals (see `notes/decisions.md` D4.1).
 
-**Day 5 (next)**: Replace mock verifier with Mistral-7B-Instruct-v0.3. Critical day for prompt design.
+## Day 5 — In Progress
+
+### D5.0 — Mistral-7B-v0.3 load + inference verified on RTX 4090
+
+**Verified**:
+- Model loads in ~5s from HuggingFace cache (warm load)
+- GPU memory: 14.5 GB / 24 GB (fp16, no quantization needed)
+- Inference latency: ~1s per sample (3 sanity prompts)
+- Format compliance: trivial prompt produces "Verdict: SUPPORTED" exactly
+- Verdict accuracy on 2 realistic test cases (1 SUPPORTED + 1 UNSUPPORTED): 2/2 correct
+- Reasoning quality: model identifies specific evidence-claim mismatches (e.g., "evidence is a 2018 meta-analysis, not a finding from MIT in 2019")
+
+**Decision**: Proceed with full prompt design and 50-sample evaluation tomorrow.
