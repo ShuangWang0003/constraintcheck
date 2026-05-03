@@ -225,3 +225,54 @@ if match.start() > 0:
 **Trade-off accepted**: Loses the modified-vs-fabricated comparative analysis originally planned for Day 9. In exchange, gains: (a) clean, uncorrupted evaluation signal, (b) a more honest reflection of PubMedQA's domain characteristics, (c) an interesting research finding to report.
 
 **Lesson**: Domain-specific data has structure that resists generic poisoning. Manual inspection with ground truth comparison is essential — synthetic sanity-check cases (D2.10) caught one bug class, but only ground-truth diffs revealed the full extent of the problem.
+
+
+
+## Day 3 — In Progress
+
+### D3.0 — Empty `__init__.py` files lost during GitHub web-UI upload
+
+**Problem**: After cloning the repo on a new machine (4090 server), `python -m tests.test_pipeline` raised `No module named tests.test_pipeline`. Root cause: empty `src/__init__.py` and `tests/__init__.py` files were silently dropped during GitHub web-UI upload (which sometimes ignores zero-byte files in batch uploads).
+
+**Fix**: Recreated both with `touch src/__init__.py tests/__init__.py`. Pipeline tests then ran 7/7 passing on the new machine, identical to the 3070 baseline.
+
+**Lesson**: For future day-end uploads, prefer `git push` over web-UI upload. Empty marker files are a reproducibility footgun.
+
+---
+
+### D3.1 — Replace mock period-split with NLTK Punkt sentence tokenizer
+
+**Decision**: Replace `answer.replace('?', '.').replace('!', '.').split('.')` (Day 1 mock) with `nltk.sent_tokenize()`.
+
+**Why NLTK**:
+- Period-based splitting fails on common medical abbreviations: `Dr.`, `Fig.`, `vs.`, `i.e.`, `e.g.`, `et al.`
+- Decimal numbers and p-values: `5.7%`, `p=0.05`
+- Citation references: `(Smith et al., 2018, Lancet)`
+- URLs in trial registries: `ClinicalTrials.gov`
+- NLTK Punkt is statistically trained on English text, handles all of these cases.
+
+**Why not LLM-based atomic claim splitting** (deferred to potential Day 11 optimization):
+- LLM-based splitting introduces cascading hallucination risk (using LLM to evaluate LLM output)
+- Slower (1 LLM call per claim → much higher latency)
+- Sentence-level granularity is sufficient for our verification task per the project scope (D1.1)
+
+**Verified by**:
+- 10/10 unit tests in `tests/test_claim_extractor.py` covering Dr./Fig./decimals/citations/empty input/short fragments
+- 10 random eval_set samples manually inspected: all sentence boundaries respected
+- Pipeline integration: `tests.test_pipeline` 7/7 passing (no regression)
+
+**Quantitative comparison on 200 eval_set samples**:
+| Metric | Mock | NLTK |
+|--------|------|------|
+| Total claims extracted | 532 | 524 |
+| Avg claims per answer | 2.66 | 2.62 |
+| Samples with disagreements | — | 8 / 200 (4%) |
+
+**Aggregate parity hides quality difference**: aggregate counts look similar because mock's mistakes cancel out (1 sentence → 2 fragments adds 1, then short fragments get filtered subtracting 1). Sample-level inspection (e.g., id=50) reveals mock breaks `insulin glargine vs. standard care` into `["...vs", "standard care..."]` and breaks `ClinicalTrials.gov` URLs at the `.gov`. NLTK preserves both.
+
+**Lesson**: Aggregate metrics are insufficient for evaluating preprocessing quality. Sample-level diff is essential.
+
+
+
+
+
