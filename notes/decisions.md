@@ -317,3 +317,53 @@ if match.start() > 0:
 - Index: FAISS IndexFlatIP (exact search, no approximation)
 - Default top_k: 3 (configurable per call)
 - Cache files: `data/faiss.index`, `data/corpus_passages.npy` (gitignored)
+
+
+
+
+cat >> notes/decisions.md << 'EOF'
+
+## Day 5 — Mistral-7B Verifier (Complete)
+
+### D5.1 — Verifier architecture
+
+- Module-level singleton + lazy loading: amortizes 5s model load across 600+ verify() calls
+- Singleton preserves Day 1 mock interface — agent.py unchanged
+- Parser: regex primary → keyword scan fallback → UNSUPPORTED default
+- Verified on RTX 4090 fp16: 14.5 GB, ~1.0s/sample, 100% parse success rate
+
+### D5.2 — Prompt V1→V2: localized intervention succeeds
+
+- V1: 9/10 golden test. Failure: C1 tagged UNSUPPORTED despite reasoning saying "contradicts the claim" — classic reasoning-label inconsistency in 7B models
+- V2 fix: expanded CONTRADICTED definition + decision rule "same topic but disagrees → CONTRADICTED not UNSUPPORTED"
+- V2 result: 10/10 golden test. No other case regressed.
+- Lesson: localized prompt surgery works when the failure pattern is identifiable
+
+### D5.3 — Prompt V2→V3: global rule causes systemic regression
+
+- Motivation: trustworthy false negatives (3/6 = 50%) — model fixates on evidence [1] when [2-3] contains stronger support
+- V3 added: "read ALL evidence", "if ANY passage supports → SUPPORTED"
+- Result: trustworthy 50%→83% (+33pp) BUT overall 64%→43% (-21pp)
+- Root cause: "if ANY passage supports" gave implicit permission to accept loose topical overlap as support. Model began reasoning: "evidence [2] discusses related topic, which aligns with claim" → SUPPORTED on fabricated citations and contradiction cases
+- Decision: rolled back to V2. Deterministic generation (do_sample=False) confirmed exact reproduction.
+- Lesson: prompt engineering trade-offs are non-monotonic. Global rules break localized fixes.
+
+### D5.4 — Final evaluation results
+
+**Golden test (10 cases)**: 10/10 (100%)
+
+**36-sample unique-claim eval (V2 final)**:
+
+| Category | Acc | Notes |
+|---|---|---|
+| trustworthy | 7/10 (70%) | Retrieval ranking sensitivity; "first report" meta-claims unverifiable |
+| unsupported_claim | 4/5 (80%) | Template pool only 5 unique; 1 false positive |
+| unsupported_numerical_claim | 6/10 (60%) | Variance across samples; 6/6 on one run, 6/10 on another |
+| hallucinated_citation | 3/5 (60%) | Model conflates topic-aligned evidence with citation existence |
+| contradiction | 2/6 (33%) | Data-level catch-22: generic templates lack medical specificity, retrieval returns unrelated evidence, UNSUPPORTED is the rational verdict |
+| **Overall** | **22/36 (61%)** | |
+
+**Key finding on contradiction**: 4/6 failures have factually correct reasoning ("evidence does not provide specific information about X") but wrong label. The error is upstream in data design — generic contradiction templates cannot retrieve topically-aligned counter-evidence. No prompt fix possible without changing the data (Day 11 optimization candidate).
+
+**Key finding on template duplication**: eval_set has only 5 unique unsupported_claim templates and 5 hallucinated_citation templates across 25 samples each. Single semantic failure modes multiply across the test set. Full 200-sample eval in Day 8 will reflect this structural limitation.
+EOF
