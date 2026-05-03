@@ -64,8 +64,6 @@ else:
 
 
 
-## Day 2 — In Progress
-
 ### D2.1 — Failure mode renaming: numerical_inconsistency → unsupported_numerical_claim
 
 **Decision**: Rename and split into two sub-types tracked via metadata:
@@ -160,4 +158,21 @@ else:
 
 
 
+---
+
+### D2.9 — Targeted recruitment for the `modified_existing_number` sub-type
+
+**Problem observed**: Naïve sequential sampling produced only 4 modified-sub-type samples out of 25, far from the targeted 12. Most untrustworthy candidates lacked numerically-modifiable content (no number, year only, age only, list counter, etc.).
+
+**Solution**: After allocating the three "simple" failure-mode chunks (unsupported_claim, hallucinated_citation, contradiction), the remaining candidate pool is scanned in deterministic order. The first 12 samples whose `long_answer` passes `_find_modifiable_number()` are recruited to the modified-sub-type pool; the next 13 unmatched samples become the fabricated-sub-type pool.
+
+**Result**:
+- Scanned 84 leftover candidates to find 12 with safely-modifiable numbers
+- This implies ~14% of PubMedQA `long_answer` samples contain numerically modifiable content (lower than the 21.4% "any number" rate from D2.1, because year/age/small-int/context-skipped numbers don't qualify)
+- Achieved precise 12/13 quota; sub-type comparison on Day 9 will be statistically meaningful
+
+**Why this design choice matters**:
+- Maintains D2.6 (disjoint trustworthy/untrustworthy pools) — recruitment only operates within the leftover untrustworthy candidates
+- Maintains D2.5 (full reproducibility) — scanning is deterministic given seed=42
+- The runtime disjointness assertion in `build_eval_set.py` provides a code-level guarantee that no `pubid` appears in both pools
 
