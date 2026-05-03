@@ -176,3 +176,52 @@ else:
 - Maintains D2.5 (full reproducibility) — scanning is deterministic given seed=42
 - The runtime disjointness assertion in `build_eval_set.py` provides a code-level guarantee that no `pubid` appears in both pools
 
+
+
+---
+
+### D2.10 — Skip rule for compound identifiers (post-hoc fix)
+
+**Problem found during sanity check**: Manual inspection of 5 random poisoned samples revealed that "Interleukin-7" had been corrupted to "Interleukin-14" — a compound biological identifier where the trailing digit is part of the name, not a statistical quantity.
+
+**Why this is a bug**: Modifying compound identifiers (IL-7, TGF-1, p53, COVID-19, type-2) produces invalid biological/medical entities, not retrieval-grounded errors. The verifier could detect such cases via prior knowledge ("IL-14 doesn't exist") rather than evidence grounding, inflating detection accuracy on a capability we are not actually testing — the same failure pattern D2.2 was designed to prevent.
+
+**Fix**: Added a fifth skip rule to `_find_modifiable_number()`:
+```python
+# Skip: numbers attached to letters or hyphens (compound identifiers)
+if match.start() > 0:
+    prev_char = answer[match.start() - 1]
+    if prev_char.isalpha() or prev_char == "-":
+        continue
+```
+
+**Verified by**: 8-case sanity check covering IL-7, TGF-1, type-2, p53. The rule correctly skips compound identifiers while still recognizing legitimate statistical numbers (e.g., the "30 percent" after "p53" in `Mutations in p53 were observed in 30 percent of the tumor samples`).
+
+**Impact on eval set**: Re-running `build_eval_set.py` with the new rule scanned 129 leftover candidates (vs 84 before) to assemble the modified pool. Final eval set contains 0 Interleukin-corrupted samples.
+
+**Lesson**: Sanity check on real data caught a bug that purely synthetic test cases (D2.2 sanity check) missed. Always inspect generated data manually.
+
+
+---
+
+### D2.11 — Drop the `modified_existing_number` sub-type entirely
+
+**Background**: D2.1 originally designed two numerical sub-types (modified vs fabricated) to enable comparative analysis on Day 9. D2.9 implemented targeted recruitment achieving precise 12/13 quota. D2.10 added skip rules for compound identifiers after sanity check found IL-7 → IL-14 corruption.
+
+**Discovery**: Manual inspection of all 12 modified samples (with ground-truth diff) revealed 7/12 had semantically corrupted modifications:
+
+- Medical classification codes (e.g., "OTA/AO 31A1-3 fractures" → "62A1-3")
+- Standard time windows (e.g., "30-day mortality" → "51-day")
+- Anatomical thresholds with units (e.g., "pupils larger than 6 mm" → "12 mm", "PTS ≥5°" → "≥10°")
+- Standard experimental conditions (e.g., "5% CO(2) incubation" → "8% CO(2)")
+- Age cutoffs (e.g., "women age 30 and older" → "age 45 and older")
+
+**Root cause**: Medical reference values (classification codes, dosage standards, time windows, anatomical thresholds) and statistical results share surface form. PubMedQA's domain — clinical/biomedical writing — is dense with the former. No achievable heuristic skip rule can reliably distinguish them without semantic understanding.
+
+**Quantitative justification**: Only 25/812 (3.1%) of eligible long_answers contain a `%` or `percent` token. Even narrowing to those, contextual modifications (e.g., "5% CO(2)") would still produce semantically odd outputs.
+
+**Decision**: Drop the modified sub-type entirely. All 25 `unsupported_numerical_claim` samples now use `fabricated_percentage` (appending an unsupported statistical claim, which carries no risk of corrupting medical reference values).
+
+**Trade-off accepted**: Loses the modified-vs-fabricated comparative analysis originally planned for Day 9. In exchange, gains: (a) clean, uncorrupted evaluation signal, (b) a more honest reflection of PubMedQA's domain characteristics, (c) an interesting research finding to report.
+
+**Lesson**: Domain-specific data has structure that resists generic poisoning. Manual inspection with ground truth comparison is essential — synthetic sanity-check cases (D2.10) caught one bug class, but only ground-truth diffs revealed the full extent of the problem.
