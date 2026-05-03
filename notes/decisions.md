@@ -275,4 +275,45 @@ if match.start() > 0:
 
 
 
+## Day 4 — In Progress
 
+### D4.1 — Replace mock retriever with FAISS + sentence-transformers (all-MiniLM-L6-v2)
+
+**Decision**: Replace the Day 1 mock retriever with FAISS over PubMedQA contexts, embedded via `all-MiniLM-L6-v2`.
+
+**Why this model**:
+- 22MB, encodes 3347 passages in 1 second on RTX 4090 (vs 30-60s estimated)
+- Strong generic baseline; medical-domain models (e.g., S-PubMedBert) deferred to Day 11 optimization
+- Cosine similarity via L2-normalized embeddings + IndexFlatIP
+
+**Why disk-cached index**:
+- First build takes ~5s (embedding + FAISS); cached load < 2s
+- Day 5-12 will iterate the verifier dozens of times; rebuilding the index every run wastes time
+- Cache invalidation: delete `data/faiss.index` to force rebuild
+
+**Architecture choice — module-level singleton**:
+- `Retriever` class encapsulates state (model, index, passages)
+- Module-level `retrieve(claim, top_k)` function preserves Day 1 mock interface
+- Lazy initialization: model only loads on first call, not at import time
+- Result: agent.py needs zero changes; tests/utility scripts can import without paying loading cost
+
+**Verified by**:
+- 6/6 unit tests in `tests/test_retriever.py` (singleton, top_k control, empty queries, medical relevance, deterministic results)
+- Pipeline integration: `tests.test_pipeline` 7/7 passing (no regression)
+- Manual inspection of 5 real eval_set samples (one per failure mode + trustworthy)
+
+**Key qualitative findings from 5-sample inspection** (relevant for Day 5 verifier prompt design):
+
+1. **NLTK + retrieval naturally isolates hallucinated citations**: When NLTK splits "(Rodriguez and Kim, 2022, Nature Medicine Letters)" as its own claim, retrieval returns completely unrelated passages (MEDLINE methodology, etc.). Day 5 verifier should easily judge these UNSUPPORTED. *This is the strongest detection signal in the system.*
+
+2. **Contradiction templates are too generic**: Sentences like "Yet, parallel evidence suggests the relationship may actually be reversed" lack medical-domain vocabulary, so retrieval returns unrelated passages. Day 5 verifier will likely tag these UNSUPPORTED rather than CONTRADICTED. The overall prediction (untrustworthy) should still be correct because of the supported-ratio rule, but the failure_mode label may not match the original injection.
+
+3. **Fabricated percentages retrieve passages that share the `%` token but differ in topic**: e.g., "37% higher response rate" retrieves "48% correct answers" (a literacy study). This is the trickiest case — verifier prompt on Day 5 will need to emphasize topical alignment, not just keyword overlap.
+
+4. **Trustworthy claims that are policy / recommendation-style** (e.g., "imaging studies are mandatory before endoscopic examination") retrieve weaker top-1 evidence than fact-stating claims. Generic recommendations are inherently harder to ground.
+
+**Configuration**:
+- Embedding dim: 384
+- Index: FAISS IndexFlatIP (exact search, no approximation)
+- Default top_k: 3 (configurable per call)
+- Cache files: `data/faiss.index`, `data/corpus_passages.npy` (gitignored)
