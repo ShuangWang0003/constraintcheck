@@ -115,3 +115,49 @@ else:
 **Why**: Eval-set generation must be fully reproducible. Passing a `random.Random(42)` from the top-level orchestrator guarantees identical output across runs, machines, and team members.
 
 
+---
+
+### D2.6 — Disjoint pools for trustworthy and untrustworthy samples
+
+**Decision**: Shuffle the 1000 PubMedQA examples once with seed=42, then slice into 5 disjoint chunks (100 trustworthy + 4×25 untrustworthy). The same `pubid` never appears in both pools.
+
+**Why**: 
+- A `long_answer` used as a trustworthy sample also has its evidence (the same paper's `context_passages`) appear in the global retrieval corpus.
+- If the same paper were also poisoned and put in the untrustworthy pool, the retriever would return that paper's contexts at high similarity, and the verifier would essentially be checking the poisoned answer against text that originally generated the unpoisoned answer — an unfair signal that inflates detection rate.
+- Disjoint pools eliminate this leakage and keep the retrieval task realistic.
+
+**Cost**: We use 200 unique papers instead of potentially 100. Given 1000+ eligible papers in PubMedQA, this is not a constraint.
+
+---
+
+### D2.7 — Filter long_answers shorter than 25 words
+
+**Decision**: Drop any PubMedQA example whose `long_answer` has fewer than 25 words before sampling.
+
+**Why**:
+- PubMedQA `long_answer` length distribution: min=8, median=37, mean=40 words. The bottom of the distribution has answers like 1-2 words ("yes", "Results varied").
+- Day 3 claim extractor splits on sentence boundaries. Answers under 25 words often produce fewer than 2 claims, which:
+  - Makes `reliability_score = supported / total` extremely noisy (e.g., 1/1 = 100% or 0/1 = 0%, no middle ground).
+  - Triggers the "no_claims_extracted" fallback in the aggregator, which artificially flags trustworthy samples as untrustworthy.
+- Filtering removes ~200 of 1000 examples but preserves a pool of ~800, more than enough for 200 sampled cases.
+
+**Trade-off**: We bias the eval set slightly toward longer answers, which may not reflect the full distribution of real LLM outputs. But the alternative — letting 1-claim samples pollute the score distribution — is worse.
+
+
+
+---
+
+### D2.8 — Numerical quota is best-effort, not strict
+
+**Decision**: Aim for 12 `modified_existing_number` + 13 `fabricated_percentage`, but accept whatever the data permits — `prefer_modify=True` may still fall back to fabrication when no safe number is available.
+
+**Why**:
+- A strict 12/13 quota would require either expanding the candidate pool (rejecting samples until 12 modifiable answers are found) or relaxing the skip rules. Both have downsides:
+  - Expanding the pool costs disjointness (D2.6) or biases toward "samples with statistical numbers."
+  - Relaxing skip rules reintroduces the "70 years → 140 years" problem (D2.2).
+- A best-effort approach is more honest: the eval set reflects PubMedQA's true numerical-content distribution.
+- Day 9 sub-type breakdown will report the actual achieved counts; sample-size differences are easy to control for in the analysis.
+
+
+
+
