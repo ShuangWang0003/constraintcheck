@@ -3113,3 +3113,100 @@ All metrics remain unchanged from the Day 8 baseline.
 - `src/agent_v1_threshold07.py` — backup of original agent before threshold change
 
 **Lesson**: In retrieval-augmented verification systems, aggregation threshold tuning is ineffective when the primary failure mode is upstream ungroundable claim types. Fix the retrieval or extraction layer first.
+
+
+
+
+## Day 12 — Failure Case Deep Dive (Complete)
+
+### D12.1 — Case selection methodology
+
+Selected 5 cases from 87 total failures (83 FP + 4 FN) in Experiment 1,
+prioritizing cases that: (a) cover both error directions, (b) have
+distinct root causes at different pipeline layers, and (c) reveal
+non-obvious system behavior worth discussing in interviews.
+
+| Case | id | Type | Failure Mode | Root Cause Layer |
+|------|-----|------|-------------|-----------------|
+| 1 | 4 | FP | trustworthy CONTRADICTED | Retrieval cross-study conflict |
+| 2 | 11 | FP | trustworthy CONTRADICTED | Retrieval cross-study conflict |
+| 3 | 7 | FP | meta-claim + hedged language | Claim extraction + Verifier |
+| 4 | 139 | FN | numerical fabrication missed | Verifier number-checking |
+| 5 | 166 | FN | citation diluted by long answer | Aggregation threshold |
+
+---
+
+### D12.2 — Key findings
+
+**Finding 1: Cross-study retrieval conflict is the dominant FP cause**
+
+Cases 1 and 2 share the same root cause: the answer reports a finding
+from one study ("no significant difference," "non-HDL-C predicts MACE"),
+but the retrieval corpus contains passages from other studies that reach
+different conclusions (combination chemo efficacy, LDL-C guidelines).
+The verifier correctly applies the CONTRADICTED rule — the evidence does
+disagree with the claim — but the disagreement is between studies, not
+between the claim and its own evidence.
+
+This is structurally unfixable with the current global retrieval corpus.
+The correct fix is to scope retrieval to source-paper contexts only
+(available in PubMedQA's `context` field but not used in the current
+architecture). This single change would likely eliminate the majority
+of the 83 FP cases.
+
+**Finding 2: Meta-claims and hedged language are unverifiable by design**
+
+Case 3 ("the authors strongly support the suggestion that...") represents
+a class of claims that cannot be grounded in external evidence — they
+assert the authors' own conclusion, which would require the paper itself
+as evidence. Similarly, hedged claims ("suggests a possible link")
+require partial-support handling that the current binary
+SUPPORTED/UNSUPPORTED distinction cannot express.
+
+**Finding 3: Numerical fabrication detection has a coverage gap**
+
+Case 4 (fabricated "63% improvement") showed reliability=1.0 — the
+highest-confidence false negative. V4 prompt's Rule 1 ("exact number
+must appear in evidence") failed because the retrieved passage contained
+percentage figures in a related context. The verifier pattern-matched
+on semantic similarity rather than numerical exactness. A post-processing
+regex check (does the specific percentage appear verbatim in any evidence
+passage?) would catch this class of failure.
+
+**Finding 4: Citation fabrication needs a dedicated aggregation rule**
+
+Case 5 showed that a hallucinated citation in a 5-claim answer only
+costs 0.2 reliability points (4/5 claims SUPPORTED = 0.8 > 0.7
+threshold). The citation was correctly identified as UNSUPPORTED, but
+the aggregation rule treats it identically to any other weak claim.
+Citations are categorically different from factual claims — fabricating
+a source is a stronger hallucination than asserting an unverifiable fact.
+A dedicated aggregation branch ("if any citation-format claim is
+UNSUPPORTED → untrustworthy") would fix this without affecting other
+failure modes.
+
+---
+
+### D12.3 — Pipeline layer attribution
+
+| Layer | Cases | Implication |
+|-------|-------|------------|
+| Retrieval (corpus scoping) | 1, 2 | Highest leverage fix — global corpus creates cross-study conflicts |
+| Claim extraction (meta-claims) | 3 | Filter "authors suggest/conclude" sentences |
+| Verifier (number-checking) | 4 | Post-processing regex for exact percentage match |
+| Aggregation (citation rule) | 5 | Dedicated branch for citation-format UNSUPPORTED |
+
+**No single fix addresses all 5 cases.** The 4 distinct root causes
+require 4 separate interventions, each at a different pipeline layer.
+This validates the modular architecture (D1.1) — each layer can be
+improved independently.
+
+---
+
+### D12.4 — Completion status
+
+**File produced**: `reports/failure_cases.md`
+- 5 full case studies with question, answer, per-claim analysis,
+  root cause, and fix recommendation
+- Summary table with pipeline layer attribution
+- ~1800 words total
