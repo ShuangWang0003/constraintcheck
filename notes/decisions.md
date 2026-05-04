@@ -2818,3 +2818,78 @@ error analysis direction
 ```
 
 
+
+## Day 9 — Experiment 2: Failure-Mode Breakdown (Complete)
+
+### D9.1 — Failure mode detection rates
+
+**Method**: Reused Day 8 predictions (`exp1_predictions.jsonl`), grouped by `failure_mode` field, computed detection rate = predicted untrustworthy / total.
+
+**Results**:
+
+| Failure Mode | Detected | Total | Detection Rate |
+|---|---:|---:|---:|
+| contradiction | 25 | 25 | 100% |
+| unsupported_claim | 24 | 25 | 96% |
+| unsupported_numerical_claim | 24 | 25 | 96% |
+| hallucinated_citation | 23 | 25 | 92% |
+
+All four failure modes detected at ≥ 92%. The system's untrustworthy detection is robust across all injection types.
+
+**Why contradiction is 100%**:  
+The V2 prompt's CONTRADICTED rule ("same topic but disagrees → CONTRADICTED") combined with the aggregation rule's CONTRADICTED branch (any CONTRADICTED claim → untrustworthy regardless of reliability score) provides two independent detection paths. Even when the verifier tags the poisoned sentence UNSUPPORTED rather than CONTRADICTED, the reliability score still drops below 0.7.
+
+**Why hallucinated_citation is lowest (92%)**:  
+2 citations share surface-level topic overlap with retrieved passages, causing the verifier to incorrectly judge SUPPORTED. V4 prompt's citation Rule 2 catches most but not all — the 2 missed cases involve citations whose journal name appears in unrelated retrieved contexts.
+
+---
+
+### D9.2 — False positive analysis
+
+**Core finding**: FPR = 83% is entirely driven by the 0.7 reliability threshold interacting with short PubMedQA answers.
+
+| Metric | FP samples (n=83) | TN samples (n=17) |
+|---|---:|---:|
+| Avg reliability score | 0.261 | 1.000 |
+| Avg claim count | 2.17 | 1.59 |
+
+**Reliability distribution of FP samples**:
+
+| Reliability Score Range | FP Samples | Share |
+|---|---:|---:|
+| 0.0–0.3 | 40 | 48% |
+| 0.3–0.5 | 37 | 45% |
+| 0.5–0.7 | 6 | 7% |
+| 0.7+ | 0 | 0% |
+
+**Three structural causes**:
+
+1. **TN samples are short (avg 1.59 claims)**  
+   A 1-claim answer where that claim is SUPPORTED yields reliability = 1.0, always passing the threshold. The 17 TN samples are disproportionately 1-claim answers — they pass not because the system is good at grounding them, but because there's only one claim to fail.
+
+2. **Threshold 0.7 is the direct driver**  
+   Every single FP sample has reliability < 0.7. This is not a gradual distribution — it's a hard boundary effect. Lowering the threshold to 0.5 would convert the 6 samples in the 0.5–0.7 bucket from FP to TN.
+
+3. **77/83 FP samples have reliability ≤ 0.5**  
+   These are "deep false positives" where most claims in a trustworthy answer are judged UNSUPPORTED. Root cause: PubMedQA trustworthy answers contain recommendation/conclusion sentences that retrieval cannot ground directly. These will remain FP regardless of threshold change.
+
+**Implication for Day 11**:
+
+- Lowering threshold 0.7 → 0.5: fixes 6 FP, minimal FN risk
+- The remaining 77 FP require either better retrieval or claim filtering
+- Priority: test threshold change first, then evaluate recommendation-sentence filtering
+
+---
+
+### D9.3 — Completion status
+
+**Files produced**:
+
+- `experiments/exp2_failure_modes.py`
+- `results/exp2_failure_modes.json`
+- `results/exp2_table.md`
+- `results/exp2_breakdown.png`
+- `results/exp2_takeaway.md`
+
+**No model re-run needed**: entire Day 9 analysis reused Day 8 predictions.
+
