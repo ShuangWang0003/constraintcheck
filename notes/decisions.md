@@ -3016,3 +3016,100 @@ process.
 - `results/exp3_ablation.json`
 - `results/exp3_table.md`
 - `results/exp3_takeaway.md`
+
+
+
+## Day 11 — Optimization (Complete)
+
+### D11.1 — Optimization hypothesis and target
+
+**Diagnosis from Day 8–9**:
+
+- FPR = 83% is the primary weakness
+- Day 9 FP reliability distribution showed 6 samples in the 0.5–0.7 range
+- Hypothesis: lowering threshold 0.7 → 0.5 would convert those 6 FP to TN with minimal recall impact
+
+**Variable changed**: `reliability_score < 0.7` → `reliability_score < 0.5` in `aggregate_node` in `src/agent.py`.
+
+One-line change, all else constant.
+
+---
+
+### D11.2 — Result: rolled back
+
+| Threshold | Accuracy | Recall | FPR | FN |
+|---|---:|---:|---:|---:|
+| 0.7 (baseline) | 56.5% | 96.0% | 83.0% | 4 |
+| 0.5 (attempt) | 56.5% | 74.0% | 61.0% | 26 |
+
+Accuracy unchanged. FPR improved by 22pp, but Recall degraded by 22pp.
+
+The trade-off is perfectly symmetric — no net benefit. Rolled back to 0.7.
+
+**Per-failure-mode at threshold = 0.5**:
+
+| Failure Mode | Baseline | Threshold 0.5 | Change |
+|---|---:|---:|---:|
+| unsupported_claim | 96% | 64% | -32pp |
+| hallucinated_citation | 92% | 60% | -32pp |
+| unsupported_numerical | 96% | 80% | -16pp |
+| contradiction | 100% | 92% | -8pp |
+
+The system loses its core detection strength across all failure modes.
+
+---
+
+### D11.3 — Root cause: threshold tuning is a blunt instrument here
+
+**Why the trade-off is symmetric**:
+
+Day 9 showed FP reliability clusters at 0.0–0.5: 77/83 = 93% of FP samples.
+
+These are trustworthy answers where retrieval cannot ground recommendation/conclusion sentences. Their reliability is usually 0.0–0.3, not 0.5–0.7. No achievable threshold fixes them.
+
+The 6 samples in the 0.5–0.7 range were converted FP → TN by threshold = 0.5, but simultaneously 22 untrustworthy samples were converted TP → FN. Their poisoned claims had reliability just above 0.5 due to partial grounding.
+
+**The distribution is bimodal**:
+
+- Trustworthy FP: cluster at 0.0–0.3  
+  Ungroundable sentences; retrieval returns nothing relevant.
+- Untrustworthy FN risk: cluster at 0.5–0.7  
+  Poisoned claims partially grounded by topic-adjacent evidence.
+
+Any threshold between 0.5 and 0.7 helps one group by roughly the same amount it hurts the other. Threshold tuning cannot break this symmetry.
+
+---
+
+### D11.4 — True fix identified: future work
+
+The correct intervention is upstream in `claim_extractor.py`: filter unverifiable sentence types before they reach the verifier.
+
+Examples include:
+
+- Recommendations
+- Policy statements
+- Meta-claims such as “to the best of our knowledge”
+
+This would raise trustworthy reliability scores without affecting untrustworthy reliability scores, breaking the symmetry.
+
+This was not implemented in Day 11 because:
+
+1. It requires defining a reliable heuristic for “unverifiable sentence” without introducing new false negatives.
+2. Day 7's NCT/registration filter showed that targeted filtering works but requires careful case analysis.
+3. A rushed implementation risks regression.
+4. The finding itself — threshold tuning is ineffective due to bimodal reliability distribution — is the Day 11 research contribution.
+
+---
+
+### D11.5 — Completion status
+
+**Final system state**: threshold = 0.7, original setting.
+
+All metrics remain unchanged from the Day 8 baseline.
+
+**Files produced**:
+
+- `results/exp_optimization.md` — full optimization log with hypothesis, result, root cause, and lesson
+- `src/agent_v1_threshold07.py` — backup of original agent before threshold change
+
+**Lesson**: In retrieval-augmented verification systems, aggregation threshold tuning is ineffective when the primary failure mode is upstream ungroundable claim types. Fix the retrieval or extraction layer first.
