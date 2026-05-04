@@ -3210,3 +3210,70 @@ improved independently.
   root cause, and fix recommendation
 - Summary table with pipeline layer attribution
 - ~1800 words total
+
+
+## Day 13 — Streamlit Demo + README (Complete)
+
+### D13.1 — Streamlit demo
+
+**File**: `app.py`
+
+**Layout**:
+- Header: title + one-line description
+- Two-column input: Question (left) + LLM Answer to Audit (right)
+- Full-width "Audit Answer" button
+- Results section:
+  - 3 metrics: Prediction (✅/⚠️) + Reliability Score + Claims Extracted
+  - Error banner with detected failure modes
+  - Per-claim expanders: verdict emoji + reasoning + retrieved evidence
+  - Collapsed JSON output for full schema inspection
+- Sidebar: architecture steps + detection capabilities + eval numbers
+
+**Default example**: aspirin/cardiovascular answer with 4 claims including
+fabricated MIT citation and fake 47% statistic — produces
+"⚠️ Untrustworthy, 25% reliability, unsupported_claim + contradiction"
+on first click, demonstrating the system immediately.
+
+**Verified**: Running at `http://localhost:8501` via MobaXterm SSH tunnel
+(172.26.102.81). Per-claim analysis renders correctly with emoji verdicts,
+evidence expanders, and failure mode banner.
+
+**Access method**: MobaXterm Tunneling → port 8501 forward to Ubuntu server.
+Standard `localhost:8501` works from Windows browser after tunnel setup.
+
+---
+
+### D13.2 — README
+
+**Sections**:
+- Problem statement (2 sentences)
+- ASCII architecture diagram (5-node pipeline with tech annotations)
+- Key Results table (Accuracy/Recall/Precision/F1/FPR)
+- Failure Mode Detection table (4 modes, 92-100%)
+- Ablation Study table (4 configurations)
+- How to Run (3 steps)
+- Evaluation commands
+- Tech Stack table
+- Limitations & Next Steps (5 items with root cause + fix)
+- Project Structure tree
+
+**Design decisions**:
+- ASCII diagram chosen over image — renders in any markdown viewer,
+  no external dependency, copy-pasteable into resume/cover letter
+- Ablation table included in README — shows research depth beyond
+  just "I built a pipeline"
+- Limitations section is honest and specific — each limitation has
+  a named root cause and a concrete fix, not generic disclaimers
+
+---
+
+### D13.3 — Completion status
+
+**Files produced**:
+- `app.py` — Streamlit demo, verified running
+- `README.md` — complete with architecture, results, limitations
+
+**Not done (Day 14)**:
+- Demo video / GIF
+- Resume bullets with final numbers
+- Final git push confirming public repo
