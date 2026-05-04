@@ -1162,3 +1162,1659 @@ All four core modules became real.
 
 This is the first fully integrated research pipeline in the project.
 
+
+
+
+# Day 7 — Smoke Test & False Positive Analysis (Complete)
+
+## Day 7 Mission
+
+Day 7 的目标不是增加新模块。
+
+Day 1–6 已经完成：
+
+* claim extractor
+* retriever
+* verifier
+* LangGraph agent
+
+Day 7 的任务是：
+
+```text
+第一次让完整 pipeline 在真实 eval_set 上运行。
+```
+
+这是项目第一次真正回答：
+
+> "这个系统到底能不能工作？"
+
+---
+
+# Day 7 核心目标
+
+Day 7 重点不是提升 accuracy，而是：
+
+* 跑完整 smoke test
+* 找系统级错误
+* 找 false positives
+* 找 pipeline 弱点
+* 验证不会 crash
+* 量化性能
+
+---
+
+## Day 7 的问题
+
+Day 1–6 只验证：
+
+```text
+组件是否能运行
+```
+
+但没有验证：
+
+```text
+整个系统是否真的合理
+```
+
+Day 7 是第一次：
+
+```text
+extract → retrieve → verify → aggregate
+```
+
+在真实样本上完整运行。
+
+---
+
+# 1. Smoke Test Setup
+
+## Sampling Strategy
+
+从：
+
+```text
+data/eval_set.jsonl
+```
+
+抽取 20 条样本。
+
+使用：
+
+```text
+seed = 7
+```
+
+采用 stratified sampling。
+
+---
+
+## Sample Distribution
+
+| Type                        | Count |
+| --------------------------- | ----- |
+| trustworthy                 | 5     |
+| unsupported_claim           | 4     |
+| unsupported_numerical_claim | 4     |
+| hallucinated_citation       | 4     |
+| contradiction               | 3     |
+
+总计：
+
+```text
+20 samples
+```
+
+---
+
+## 为什么用 Stratified Sampling
+
+避免：
+
+```text
+随机 sample 导致 failure mode 偏斜
+```
+
+确保：
+
+* 每种 failure mode 都被测试
+* trustworthy 有代表性
+* contradiction 不会缺失
+
+---
+
+# 2. Smoke Test Before Bug Fix
+
+## 初始结果
+
+```text
+Overall Accuracy: 16/20 = 80%
+Recall:           1.00
+FPR:              0.80
+Crashes:          0
+```
+
+---
+
+## Interpretation
+
+### Recall = 1.00
+
+意味着：
+
+```text
+15/15 untrustworthy 全部被抓到
+```
+
+没有漏掉任何 hallucination。
+
+这是一个非常强的信号。
+
+---
+
+### FPR = 0.80
+
+意味着：
+
+```text
+5 个 trustworthy 中有 4 个被误判
+```
+
+系统非常敏感。
+
+---
+
+## 核心发现
+
+系统并不是：
+
+```text
+检不出错误
+```
+
+而是：
+
+```text
+太容易怀疑正常答案
+```
+
+---
+
+## Day 7 第一个重要发现
+
+系统的主要问题不是：
+
+```text
+false negative
+```
+
+而是：
+
+```text
+false positive
+```
+
+---
+
+# 3. Root Cause Discovery
+
+## Bug Discovery
+
+发现：
+
+```text
+id=50
+label=trustworthy
+```
+
+被错误判成：
+
+```text
+untrustworthy
+```
+
+---
+
+## 原因
+
+NLTK claim extractor 提取出：
+
+```text
+Trial Registration (ORIGIN ClinicalTrials.gov number NCT00069784)
+```
+
+作为 claim。
+
+---
+
+## 问题
+
+这个句子其实不是 claim。
+
+它是：
+
+```text
+metadata sentence
+```
+
+---
+
+## Metadata Sentence 的问题
+
+这类句子：
+
+* 不可验证
+* retrieval 找不到 evidence
+* verifier 永远输出 UNSUPPORTED
+
+结果：
+
+```text
+reliability_score 被拉低
+```
+
+导致：
+
+```text
+false positive
+```
+
+---
+
+# 4. Day 7 Bug Fix
+
+## 修复位置
+
+文件：
+
+```text
+src/claim_extractor.py
+```
+
+---
+
+## 新增过滤器
+
+加入：
+
+```python
+_METADATA_PATTERNS
+```
+
+用于过滤 metadata sentence。
+
+---
+
+## 过滤内容
+
+新增规则：
+
+### ClinicalTrials
+
+```text
+ClinicalTrials.gov
+```
+
+---
+
+### Trial IDs
+
+```text
+NCT\d{5,}
+```
+
+例如：
+
+```text
+NCT00069784
+```
+
+---
+
+### ISRCTN
+
+```text
+ISRCTN\d+
+```
+
+---
+
+### Trial Registration
+
+```text
+Trial Registration
+```
+
+---
+
+### Bare Citation
+
+例如：
+
+```text
+Smith et al., 2020.
+```
+
+---
+
+## 为什么过滤这些句子
+
+因为它们不是：
+
+```text
+factual claims
+```
+
+它们属于：
+
+```text
+metadata
+bibliographic info
+registry identifiers
+```
+
+---
+
+# 5. Verification of Fix
+
+## 新增 Unit Test
+
+验证：
+
+* metadata 被过滤
+* 普通句子保留
+* 混合句子部分保留
+
+---
+
+## Result After Fix
+
+```text
+Overall Accuracy: 17/20 = 85%
+Recall:           1.00
+FPR:              0.60
+```
+
+---
+
+## Improvement
+
+| Metric   | Before | After |
+| -------- | ------ | ----- |
+| Accuracy | 80%    | 85%   |
+| Recall   | 1.00   | 1.00  |
+| FPR      | 0.80   | 0.60  |
+
+---
+
+## Key Improvement
+
+trustworthy accuracy：
+
+```text
+1/5 → 2/5
+```
+
+---
+
+# 6. Remaining False Positives
+
+修复 metadata bug 后。
+
+仍然剩余：
+
+```text
+3 trustworthy false positives
+```
+
+---
+
+# 7. Case Analysis
+
+## Case 1 — id=41
+
+问题 claim：
+
+```text
+usefulness of criteria lists in clinical setting
+```
+
+---
+
+## Retrieval Result
+
+retriever 返回：
+
+```text
+study methodology passages
+```
+
+---
+
+## Verifier Behavior
+
+verifier 判断：
+
+```text
+evidence 没有直接支持 recommendation
+```
+
+输出：
+
+```text
+UNSUPPORTED
+```
+
+---
+
+## Why This Happens
+
+推荐性结论句：
+
+```text
+不容易 grounding
+```
+
+因为 corpus 更偏实验事实。
+
+---
+
+## Case 2 — id=19
+
+Claim：
+
+```text
+no impact on pain nor analgesics
+```
+
+---
+
+## Retrieval
+
+找到：
+
+```text
+limited benefit
+```
+
+---
+
+## Verifier Interpretation
+
+Mistral 认为：
+
+```text
+limited benefit ≠ no impact
+```
+
+于是输出：
+
+```text
+CONTRADICTED
+```
+
+---
+
+## Reality
+
+这是一个：
+
+```text
+boundary case
+```
+
+模型并不完全错。
+
+---
+
+## Case 3 — id=6
+
+Claim：
+
+```text
+Kupffer and endothelial damage reflected by HA serum levels
+```
+
+---
+
+## Retrieval
+
+返回：
+
+```text
+serum-level related evidence
+```
+
+但来自不同 context。
+
+---
+
+## Verifier Behavior
+
+判断：
+
+```text
+same topic but different conclusion
+```
+
+输出：
+
+```text
+CONTRADICTED
+```
+
+---
+
+# 8. Day 7 Key Insight
+
+Day 7 发现：
+
+问题不在 verifier。
+
+而在：
+
+```text
+retrieval precision
+```
+
+---
+
+## 真实问题
+
+retriever 找到：
+
+```text
+topically adjacent evidence
+```
+
+不是：
+
+```text
+claim-specific evidence
+```
+
+---
+
+## Consequence
+
+verifier 被迫判断：
+
+```text
+partial overlap
+```
+
+容易输出：
+
+```text
+CONTRADICTED
+```
+
+---
+
+# 9. Day 7 Final Metrics
+
+## Final Result
+
+```text
+Overall Accuracy: 85%
+Recall:           1.00
+FPR:              0.60
+Errors:           0 crashes
+Avg Latency:      3.3 sec/sample
+```
+
+---
+
+## Interpretation
+
+### Strength
+
+系统能：
+
+```text
+100% 捕获 hallucinated answers
+```
+
+---
+
+### Weakness
+
+系统对 trustworthy 样本：
+
+```text
+仍然偏保守
+```
+
+---
+
+# 10. Files Changed
+
+## Updated
+
+```text
+src/claim_extractor.py
+```
+
+新增 metadata filter。
+
+---
+
+## New Files
+
+```text
+tests/run_smoke_test.py
+data/smoke_test.jsonl
+results/smoke_test_results.jsonl
+```
+
+---
+
+# 11. Day 7 Completion Status
+
+## Completed
+
+### Smoke Test
+
+```text
+20 samples
+```
+
+成功。
+
+---
+
+### Metadata Bug Fix
+
+成功。
+
+---
+
+### False Positive Root Cause Analysis
+
+完成。
+
+---
+
+### Latency Validation
+
+完成。
+
+---
+
+### Zero Crash
+
+验证通过。
+
+---
+
+# 12. Known Limitations
+
+进入 Day 8 时仍存在：
+
+---
+
+## Limitation 1
+
+FPR 偏高：
+
+```text
+0.60
+```
+
+---
+
+## Limitation 2
+
+Recommendation / conclusion sentence 难 grounding。
+
+---
+
+## Limitation 3
+
+2-claim answer 对 threshold 很敏感。
+
+例如：
+
+```text
+1 unsupported / 2 claims
+→ reliability_score = 0.5
+→ untrustworthy
+```
+
+---
+
+## Limitation 4
+
+retriever 更偏 topic similarity。
+
+不是 strict factual alignment。
+
+---
+
+# 13. Day 7 Decisions
+
+## D7.1 — Smoke test as system validation
+
+Decision:
+
+```text
+Use 20-sample stratified evaluation.
+```
+
+Reason:
+
+small enough to inspect manually.
+
+---
+
+## D7.2 — Metadata sentence filtering
+
+Decision:
+
+```text
+Filter registry/citation metadata.
+```
+
+Reason:
+
+prevent false positives.
+
+---
+
+## D7.3 — Accept remaining trustworthy errors
+
+Decision:
+
+```text
+Treat remaining errors as model limitation.
+```
+
+Reason:
+
+not deterministic bug.
+
+---
+
+# 14. Day 7 Summary
+
+Day 7 是整个项目第一次真正的系统验证。
+
+它证明：
+
+```text
+pipeline 能运行
+pipeline 不 crash
+pipeline 能抓 hallucination
+pipeline 有 measurable performance
+```
+
+Day 7 的价值不在 accuracy。
+
+而在：
+
+```text
+发现真实失败模式
+```
+
+Day 7 发现：
+
+* verifier 能工作
+* retrieval precision 是下一阶段问题
+* metadata sentence 是真实 bug
+* trustworthy false positives 是主要 limitation
+
+最终 Day 7 证明：
+
+```text
+系统已经不是 prototype
+而是可测量、可调优的研究 pipeline
+```
+
+进入 Day 8 时，项目已经具备：
+
+```text
+claim_extractor.py ✅
+retriever.py ✅
+verifier.py ✅
+LangGraph agent ✅
+smoke test benchmark ✅
+```
+
+
+# Day 8 — Experiment 1: Overall Baseline Evaluation (Complete)
+
+## Day 8 Mission
+
+Day 8 的目标不是新增模块。
+
+Day 1–7 已完成：
+
+* claim extraction
+* retrieval
+* verification
+* aggregation
+* LangGraph integration
+* smoke test
+
+Day 8 的任务是：
+
+```text
+第一次在完整 200 条 eval_set 上运行系统。
+```
+
+这是项目第一次真正得到：
+
+```text
+full benchmark metrics
+```
+
+---
+
+# Day 8 核心问题
+
+Day 7 的 smoke test 只用了：
+
+```text
+20 samples
+```
+
+虽然能发现 bug。
+
+但不能说明：
+
+```text
+整体系统到底表现如何
+```
+
+Day 8 要回答：
+
+> 在完整 benchmark 上，这个系统到底准确吗？
+
+---
+
+# Day 8 核心目标
+
+完成：
+
+* 跑完整 200 条 benchmark
+* 保存逐条预测结果
+* 生成 confusion matrix
+* 计算 precision / recall / F1
+* 分析 failure modes
+* 找出系统级瓶颈
+* 为 Day 11 优化提供依据
+
+---
+
+# 1. Experiment Setup
+
+## Script
+
+新增实验脚本：
+
+```text
+experiments/exp1_baseline.py
+```
+
+---
+
+## 输入数据
+
+来自：
+
+```text
+data/eval_set.jsonl
+```
+
+规模：
+
+```text
+200 samples
+```
+
+组成：
+
+| Label         | Count |
+| ------------- | ----- |
+| trustworthy   | 100   |
+| untrustworthy | 100   |
+
+---
+
+## Untrustworthy Breakdown
+
+| Failure Mode                | Count |
+| --------------------------- | ----- |
+| unsupported_claim           | 25    |
+| unsupported_numerical_claim | 25    |
+| hallucinated_citation       | 25    |
+| contradiction               | 25    |
+
+---
+
+## Evaluation Flow
+
+对于每条样本：
+
+```text
+question
+answer_to_audit
+```
+
+调用：
+
+```python
+audit(question, answer_to_audit)
+```
+
+记录：
+
+* prediction
+* reliability_score
+* failure_modes_detected
+* n_claims
+* elapsed_time
+
+---
+
+## Crash Safety
+
+每 20 条样本：
+
+```text
+checkpoint save
+```
+
+原因：
+
+避免：
+
+```text
+长时间 batch run 中断
+```
+
+---
+
+# 2. Day 8 Raw Results
+
+## Confusion Matrix
+
+```text
+TP = 96
+TN = 17
+FP = 83
+FN = 4
+```
+
+---
+
+## Metrics
+
+| Metric    | Value |
+| --------- | ----- |
+| Accuracy  | 56.5% |
+| Precision | 53.6% |
+| Recall    | 96.0% |
+| F1        | 68.8% |
+| FPR       | 83.0% |
+
+---
+
+## Immediate Observation
+
+系统呈现：
+
+```text
+high recall
+low precision
+```
+
+---
+
+## Meaning
+
+系统几乎不会漏掉 hallucination。
+
+但：
+
+```text
+太容易误判 trustworthy
+```
+
+---
+
+# 3. Per Failure Mode Performance
+
+## Detection Rate
+
+| Failure Mode                | Detected | Rate |
+| --------------------------- | -------- | ---- |
+| unsupported_claim           | 24/25    | 96%  |
+| unsupported_numerical_claim | 24/25    | 96%  |
+| hallucinated_citation       | 23/25    | 92%  |
+| contradiction               | 25/25    | 100% |
+
+---
+
+## Interpretation
+
+### unsupported_claim
+
+检测率：
+
+```text
+96%
+```
+
+说明 verifier 能发现：
+
+```text
+新增 unsupported statement
+```
+
+---
+
+### unsupported_numerical_claim
+
+检测率：
+
+```text
+96%
+```
+
+说明 numerical hallucination 很容易被抓。
+
+原因：
+
+* 数字 mismatch 明显
+* retrieval 很容易发现不一致
+
+---
+
+### hallucinated_citation
+
+检测率：
+
+```text
+92%
+```
+
+略低。
+
+原因：
+
+citation sentence 有时被 claim extractor 合并进其他句子。
+
+---
+
+### contradiction
+
+检测率：
+
+```text
+100%
+```
+
+说明：
+
+```text
+CONTRADICTED prompt rule 非常强
+```
+
+---
+
+# 4. Result Interpretation
+
+## 系统本质
+
+Day 8 证明：
+
+> 系统是一个高 recall、低 precision detector。
+
+---
+
+## Strength
+
+系统非常擅长：
+
+```text
+发现 hallucination
+```
+
+---
+
+## Weakness
+
+系统非常容易：
+
+```text
+怀疑正常答案
+```
+
+---
+
+## Recall = 96%
+
+意味着：
+
+```text
+100 个 poisoned answers 中
+96 个被抓住
+```
+
+---
+
+## FPR = 83%
+
+意味着：
+
+```text
+100 个 trustworthy 中
+83 个被误报
+```
+
+---
+
+## 核心结论
+
+系统不是：
+
+```text
+抓不到 hallucination
+```
+
+而是：
+
+```text
+对 trustworthy 不够宽容
+```
+
+---
+
+# 5. Root Cause Analysis
+
+## Root Cause 1 — Threshold Too Strict
+
+当前 aggregation rule：
+
+```python
+if reliability_score < 0.7:
+    prediction = "untrustworthy"
+```
+
+---
+
+## 问题
+
+PubMedQA answer 通常只有：
+
+```text
+2–3 claims
+```
+
+---
+
+## Example — 3 Claims
+
+```text
+2 supported
+1 unsupported
+```
+
+得到：
+
+```text
+reliability_score = 0.667
+```
+
+---
+
+## Consequence
+
+```text
+0.667 < 0.7
+→ untrustworthy
+```
+
+即使：
+
+```text
+大部分 claim 是正确的
+```
+
+---
+
+## Example — 2 Claims
+
+```text
+1 supported
+1 unsupported
+```
+
+得到：
+
+```text
+0.5
+```
+
+直接：
+
+```text
+untrustworthy
+```
+
+---
+
+## Observation
+
+短答案对 threshold 非常敏感。
+
+---
+
+# 6. Root Cause 2 — Recommendation Sentences
+
+## Problem
+
+PubMedQA answers 经常包含：
+
+```text
+clinical recommendation
+conclusion sentence
+suggestion
+```
+
+---
+
+## Example
+
+```text
+criteria lists may be useful in clinical settings
+```
+
+---
+
+## Retrieval Problem
+
+retriever 找到：
+
+```text
+study results
+```
+
+但不是 recommendation rationale。
+
+---
+
+## Consequence
+
+verifier 输出：
+
+```text
+UNSUPPORTED
+```
+
+---
+
+## Result
+
+reliability_score 降低。
+
+---
+
+# 7. Root Cause 3 — Corpus Structure
+
+## PubMedQA Contexts
+
+更偏向：
+
+```text
+study findings
+numerical evidence
+methods
+```
+
+---
+
+## 不包含
+
+```text
+clinical recommendation reasoning
+```
+
+---
+
+## Consequence
+
+recommendation sentences 系统性难 grounding。
+
+---
+
+# 8. Why Recall Is So High
+
+## Prompt V4
+
+Day 5 prompt 已加入：
+
+* numerical mismatch rule
+* citation rule
+* contradiction rule
+
+---
+
+## 效果
+
+对于 poisoned answer：
+
+```text
+几乎总能找到 mismatch
+```
+
+---
+
+## Aggregation Rule
+
+只要：
+
+```text
+出现 CONTRADICTED
+```
+
+直接：
+
+```text
+untrustworthy
+```
+
+---
+
+## Result
+
+Recall 非常高。
+
+---
+
+# 9. Day 8 Main Insight
+
+Day 8 最大发现：
+
+问题不在 verifier。
+
+也不在 retriever。
+
+真正问题在：
+
+```text
+aggregation threshold
+```
+
+---
+
+## Why?
+
+因为：
+
+```text
+大多数 FP 来自 1 个 unsupported claim
+```
+
+不是：
+
+```text
+整个 answer 都错
+```
+
+---
+
+# 10. Implication for Day 11
+
+Day 11 将进行优化实验。
+
+---
+
+## Candidate Fix 1 — Lower Threshold
+
+尝试：
+
+```text
+0.7 → 0.5
+```
+
+---
+
+### Potential Benefit
+
+大量 FP 转为 TN。
+
+---
+
+### Risk
+
+可能降低 recall。
+
+---
+
+## Candidate Fix 2 — Recommendation Filtering
+
+在 claim extractor 中过滤：
+
+```text
+non-factual recommendation sentences
+```
+
+---
+
+### Potential Benefit
+
+减少 unsupported recommendation。
+
+---
+
+### Risk
+
+可能误删重要 claim。
+
+---
+
+## Day 11 Strategy
+
+优先测试：
+
+```text
+threshold adjustment
+```
+
+再测试：
+
+```text
+claim filtering
+```
+
+---
+
+# 11. Files Produced
+
+## Experiment Script
+
+```text
+experiments/exp1_baseline.py
+```
+
+---
+
+## Analysis Script
+
+```text
+experiments/exp1_analyze.py
+```
+
+---
+
+## Results
+
+```text
+results/exp1_predictions.jsonl
+results/exp1_baseline.json
+results/exp1_confusion_matrix.png
+results/exp1_takeaway.md
+```
+
+---
+
+# 12. Completion Status
+
+## Day 8 Completed
+
+### Full 200-sample benchmark
+
+完成。
+
+---
+
+### Metrics Calculation
+
+完成。
+
+---
+
+### Failure Mode Analysis
+
+完成。
+
+---
+
+### Confusion Matrix
+
+完成。
+
+---
+
+### Root Cause Analysis
+
+完成。
+
+---
+
+### Day 11 Optimization Direction
+
+明确。
+
+---
+
+# 13. Day 8 Decisions
+
+## D8.1 — Full benchmark evaluation
+
+Decision:
+
+```text
+Run all 200 samples.
+```
+
+Reason:
+
+need statistically meaningful metrics.
+
+---
+
+## D8.2 — Checkpoint every 20 samples
+
+Decision:
+
+```text
+save partial progress.
+```
+
+Reason:
+
+prevent rerunning entire benchmark after interruption.
+
+---
+
+## D8.3 — Prioritize recall over precision
+
+Decision:
+
+```text
+accept high FPR initially.
+```
+
+Reason:
+
+hallucination detection should minimize missed unsafe outputs.
+
+---
+
+## D8.4 — Treat threshold as optimization variable
+
+Decision:
+
+```text
+0.7 is provisional.
+```
+
+Reason:
+
+observed to cause FP inflation.
+
+---
+
+# 14. Day 8 Summary
+
+Day 8 是第一次真正的系统 benchmark。
+
+它回答了：
+
+> 系统在完整数据集上到底表现如何？
+
+Day 8 证明：
+
+```text
+系统非常擅长发现 hallucination
+```
+
+但同时：
+
+```text
+系统对 trustworthy answer 不够宽容
+```
+
+Day 8 的最大价值不是 accuracy。
+
+而是：
+
+```text
+定位系统瓶颈
+```
+
+Day 8 找到：
+
+* recall 已非常高
+* contradiction rule 有效
+* numerical verifier 有效
+* threshold 是最大问题
+* recommendation claim 是难点
+
+最终 Day 8 建立了：
+
+```text
+完整 benchmark baseline
+```
+
+未来所有优化都必须与 Day 8 比较。
+
+Day 8 是：
+
+```text
+系统性能基线
+```
+
+进入 Day 9 时，项目已经具备：
+
+```text
+完整 benchmark
+confusion matrix
+failure mode statistics
+error analysis direction
+```
+
+
