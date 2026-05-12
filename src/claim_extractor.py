@@ -1,49 +1,78 @@
 """
-Claim Extractor: splits an LLM-generated answer into a list of claims.
+Claim extractor: splits answer text into individual verifiable claims.
 
-Day 3 (real): NLTK Punkt sentence tokenizer.
-  - Handles abbreviations correctly: "Dr.", "Fig.", "i.e.", "e.g.", "vs."
-  - Handles decimal numbers: "5.7%", "p=0.05"
-  - Handles citation references: "(Smith et al., 2020)"
-
-The interface (extract_claims(answer: str) -> list[str]) is unchanged
-from the Day 1 mock, so agent.py needs no modification.
+Day 3: NLTK Punkt sentence tokenizer replacing period-split mock.
+Day 7 fix: filter out metadata sentences (trial registration, ClinicalTrials,
+NCT numbers) that cannot be grounded in evidence and artificially lower
+reliability scores.
 """
 
+import re
 import nltk
 
-# Filter out very short fragments (likely citation tails or truncated stubs)
-MIN_CLAIM_WORDS = 4
+# Download punkt if needed
+try:
+    nltk.data.find("tokenizers/punkt")
+except LookupError:
+    nltk.download("punkt")
+
+try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    nltk.download("punkt_tab")
+
+
+# Patterns for sentences that are metadata, not verifiable claims
+_METADATA_PATTERNS = [
+    r"ClinicalTrials\.gov",
+    r"\bNCT\d{5,}\b",
+    r"\bISRCTN\d+\b",
+    r"Trial [Rr]egistration",
+    r"[Cc]linical [Tt]rial [Nn]umber",
+    r"^\s*\(?[A-Z][a-z]+ et al\.\,?\s*\d{4}\)?\.?\s*$",  # bare citations
+]
+
+_METADATA_RE = re.compile("|".join(_METADATA_PATTERNS))
 
 
 def extract_claims(answer: str) -> list[str]:
     """
-    Split an answer into sentence-level claims.
+    Split answer into verifiable claim sentences.
 
-    Args:
-        answer: the LLM-generated answer to audit
-
-    Returns:
-        A list of claim strings, each at least MIN_CLAIM_WORDS words long.
-        Empty list if the answer has no extractable claims.
+    Filters:
+    - Sentences shorter than 4 words
+    - Metadata sentences (trial registration numbers, bare citations)
     """
     if not answer or not answer.strip():
         return []
 
     sentences = nltk.sent_tokenize(answer)
-    claims = [s.strip() for s in sentences if len(s.strip().split()) >= MIN_CLAIM_WORDS]
+
+    claims = []
+    for s in sentences:
+        s = s.strip()
+        # Filter: too short
+        if len(s.split()) < 4:
+            continue
+        # Filter: metadata / registration sentences
+        if _METADATA_RE.search(s):
+            continue
+        claims.append(s)
+
     return claims
 
 
 if __name__ == "__main__":
-    # Quick smoke test on a real-looking medical answer with abbreviations
-    test_answer = (
-        "Aspirin reduces heart attack risk by 22 percent (Smith et al., 2018). "
-        "This was confirmed in a 2018 meta-analysis. "
-        "Dr. Johnson's review found similar effects across age groups. "
-        "However, the benefit may not extend to patients over 70 years."
-    )
-    claims = extract_claims(test_answer)
-    print(f"Found {len(claims)} claims:")
-    for i, c in enumerate(claims, 1):
-        print(f"  {i}. {c}")
+    test_cases = [
+        # Normal answer
+        "Aspirin reduces heart attack risk. This was shown in multiple RCTs.",
+        # Contains NCT number — should be filtered
+        "Trial Registration (ORIGIN ClinicalTrials.gov number NCT00069784).",
+        # Contains both
+        "Severe hypoglycaemia increases CV risk. Trial Registration NCT00069784.",
+    ]
+    for text in test_cases:
+        claims = extract_claims(text)
+        print(f"INPUT:  {text[:80]}")
+        print(f"CLAIMS: {claims}")
+        print()
