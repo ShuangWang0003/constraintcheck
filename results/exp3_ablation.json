@@ -1,0 +1,58 @@
+[
+  {
+    "label": "V1: claim-only",
+    "use_retrieval": false,
+    "use_consistency": false,
+    "accuracy": 0.8,
+    "recall": 1.0,
+    "fpr": 1.0,
+    "tp": 40,
+    "tn": 0,
+    "fp": 10,
+    "fn": 0,
+    "avg_latency": 1.48,
+    "total_time": 73.8
+  },
+  {
+    "label": "V2: + retrieval",
+    "use_retrieval": true,
+    "use_consistency": false,
+    "accuracy": 0.82,
+    "recall": 0.975,
+    "fpr": 0.8,
+    "tp": 39,
+    "tn": 2,
+    "fp": 8,
+    "fn": 1,
+    "avg_latency": 3.23,
+    "total_time": 161.7
+  },
+  {
+    "label": "V3: + self-consistency",
+    "use_retrieval": false,
+    "use_consistency": true,
+    "accuracy": 0.8,
+    "recall": 1.0,
+    "fpr": 1.0,
+    "tp": 40,
+    "tn": 0,
+    "fp": 10,
+    "fn": 0,
+    "avg_latency": 7.33,
+    "total_time": 366.5
+  },
+  {
+    "label": "V4: full system",
+    "use_retrieval": true,
+    "use_consistency": true,
+    "accuracy": 0.8,
+    "recall": 0.925,
+    "fpr": 0.7,
+    "tp": 37,
+    "tn": 3,
+    "fp": 7,
+    "fn": 3,
+    "avg_latency": 17.02,
+    "total_time": 851.0
+  }
+]

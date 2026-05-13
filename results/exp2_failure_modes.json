@@ -1,0 +1,53 @@
+{
+  "failure_modes": {
+    "unsupported_claim": {
+      "total": 25,
+      "detected": 24,
+      "missed": 1,
+      "detection_rate": 0.96,
+      "missed_ids": [
+        107
+      ]
+    },
+    "unsupported_numerical_claim": {
+      "total": 25,
+      "detected": 24,
+      "missed": 1,
+      "detection_rate": 0.96,
+      "missed_ids": [
+        139
+      ]
+    },
+    "hallucinated_citation": {
+      "total": 25,
+      "detected": 23,
+      "missed": 2,
+      "detection_rate": 0.92,
+      "missed_ids": [
+        166,
+        172
+      ]
+    },
+    "contradiction": {
+      "total": 25,
+      "detected": 25,
+      "missed": 0,
+      "detection_rate": 1.0,
+      "missed_ids": []
+    }
+  },
+  "false_positive_analysis": {
+    "n_fp": 83,
+    "n_tn": 17,
+    "fp_avg_reliability": 0.261,
+    "tn_avg_reliability": 1.0,
+    "fp_avg_claims": 2.17,
+    "tn_avg_claims": 1.59,
+    "fp_reliability_dist": {
+      "0.0-0.3": 40,
+      "0.3-0.5": 37,
+      "0.5-0.7": 6,
+      "0.7+": 0
+    }
+  }
+}
